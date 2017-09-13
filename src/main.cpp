@@ -41,6 +41,29 @@ double polyeval(Eigen::VectorXd coeffs, double x) {
   return result;
 }
 
+double polyeval_deriv(Eigen::VectorXd coeffs, double x) {
+  double result = 0.0;
+  for (int i = 1; i < coeffs.size(); i++) {
+    result += coeffs[i] * i * pow(x, i-1);
+  }
+  return result;
+}
+
+Eigen::VectorXd delayStateVector(double v, double dt, double delta, double a, double cte, double epsi)
+{
+  double Lf = 2.67;
+  double px_next = v * dt;
+  double py_next = 0;
+  double psi_next = -v * delta * dt / Lf;
+  double v_next = v + a * dt;
+  double cte_next = cte + v * sin(epsi) * dt;
+  double epsi_next = epsi + psi_next;
+
+  Eigen::VectorXd state(6);
+  state << px_next, py_next, psi_next, v_next, cte_next, epsi_next;
+  return state;
+}
+
 // Fit a polynomial.
 // Adapted from
 // https://github.com/JuliaMath/Polynomials.jl/blob/master/src/Polynomials.jl#L676-L716
@@ -92,14 +115,51 @@ int main() {
           double psi = j[1]["psi"];
           double v = j[1]["speed"];
 
+          std::cout <<"speed "<< v << std::endl;
+          double steer_value = j[1]["steering_angle"];
+          double throttle_value = j[1]["throttle"];
+          double Lf = 2.67;
+
+          for(size_t i = 0; i < ptsx.size(); ++i)
+          {
+          //shift car reference angle to 90 degrees
+          double shift_x = ptsx[i] - px;
+          double shift_y = ptsy[i] - py;
+
+          ptsx[i] = (shift_x * cos(0 - psi) - shift_y * sin(0-psi));
+          ptsy[i] = (shift_x * sin(0 - psi) + shift_y * cos(0-psi));
+          }
+
+          double *ptrx = &ptsx[0];
+          Eigen::Map<Eigen::VectorXd> ptsx_transform(ptrx, 6);
+
+          double *ptry = &ptsy[0];
+          Eigen::Map<Eigen::VectorXd> ptsy_transform(ptry, 6);
+
+          auto coeffs = polyfit(ptsx_transform, ptsy_transform, 3);
+
+          //calculate cte and epsi
+          double cte = polyeval(coeffs, 0);
+          //double epsi = psi - atan(coeffs[1] + 2 * px * coeffs[2] + 3 * coeffs[3] * pow(px, 2))
+          double epsi = -atan(coeffs[1]);
+
+          //move all the readings in the future according to the kinematic model
+          const double dt = 0.1;
+
+          Eigen::VectorXd state(6);
+          state = delayStateVector(v, dt, steer_value, throttle_value, cte, epsi);
+          std::cout << state;
           /*
           * TODO: Calculate steering angle and throttle using MPC.
           *
           * Both are in between [-1, 1].
           *
           */
-          double steer_value;
-          double throttle_value;
+          //double steer_value;
+          //double throttle_value;
+          auto control_values = mpc.Solve(state, coeffs);
+          steer_value = -control_values [0];
+          throttle_value = control_values [1];
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
@@ -107,7 +167,7 @@ int main() {
           msgJson["steering_angle"] = steer_value;
           msgJson["throttle"] = throttle_value;
 
-          //Display the MPC predicted trajectory 
+          //Display the MPC predicted trajectory
           vector<double> mpc_x_vals;
           vector<double> mpc_y_vals;
 
