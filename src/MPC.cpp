@@ -28,11 +28,10 @@ size_t a_start = delta_start + N - 1;
 // presented in the classroom matched the previous radius.
 //
 // This is the length from front to CoG that has a similar radius.
-const double Lf = 2.67;
 const double ref_v = 100;
 
 class FG_eval {
- public:
+public:
   // Fitted polynomial coefficients
   Eigen::VectorXd coeffs;
   FG_eval(Eigen::VectorXd coeffs) { this->coeffs = coeffs; }
@@ -43,40 +42,35 @@ class FG_eval {
     // `fg` a vector of the cost constraints, `vars` is a vector of variable values (state & actuators)
     // NOTE: You'll probably go back and forth between this function and
     // the Solver function below.
-    fg[0] = 0;
 
     // ---------------------
     // Reference State Cost
     // ---------------------
 
-    // cost based on reference state
+    fg[0] = 0;
+    // The part of the cost based on the reference state
     for (unsigned int t=0; t<N; t++) {
-        fg[0] += 3000*CppAD::pow(vars[cte_start+t], 2);
-        fg[0] += 3000*CppAD::pow(vars[epsi_start+t], 2);
-        fg[0] += 5*CppAD::pow(vars[v_start+t] - ref_v, 2);
-      }
+      fg[0] += 2000 * CppAD::pow(vars[cte_start+t], 2);
+      fg[0] += 2000 * CppAD::pow(vars[epsi_start+t], 2);
+      fg[0] += CppAD::pow(vars[v_start+t] - ref_v, 2);
+    }
 
-    // cost to penalize big actuations
+    // Minimize the use of actuators.
     for (unsigned int t=0; t<N-1; t++) {
-        fg[0] += 5*CppAD::pow(vars[delta_start + t], 2);
-        fg[0] += 5*CppAD::pow(vars[a_start + t], 2);
-      }
+      fg[0] += 100 * CppAD::pow(vars[delta_start + t], 2);
+      fg[0] += CppAD::pow(vars[a_start + t], 2);
+    }
 
-    // cost to smooth actuation changes
+    // Minimize the value gap between sequential actuations.
     for (unsigned int t=0; t<N-2; t++) {
-        fg[0] += 200*CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2);
-        fg[0] += 10*CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2);
-      }
+      fg[0] += CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2);
+      fg[0] += CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2);
+    }
 
-    //
-    // Setup Constraints
-    //
+    // ---------------------
+    // Constraints
+    // ---------------------
 
-    // Initial constraints
-    //
-    // We add 1 to each of the starting indices due to cost being located at
-    // index 0 of `fg`.
-    // This bumps up the position of all the other values.
     fg[1 + x_start] = vars[x_start];
     fg[1 + y_start] = vars[y_start];
     fg[1 + psi_start] = vars[psi_start];
@@ -106,11 +100,8 @@ class FG_eval {
       AD<double> delta0 = vars[delta_start + t - 1];
       AD<double> a0 = vars[a_start + t - 1];
 
-      AD<double> f0 = coeffs[0] + coeffs[1] * x0 +
-              //coeffs[2] * CppAD::pow(x0, 2);
-              coeffs[2] * CppAD::pow(x0, 2) +
-              coeffs[3] * CppAD::pow(x0, 3);
-      AD<double> f0_prime = CppAD::atan(3 * coeffs[3] * x0 * x0 + 2 * coeffs[2] * x0 + coeffs[1]);
+      AD<double> f0 = coeffs[0] + coeffs[1] * x0 + coeffs[2] * CppAD::pow(x0, 2) + coeffs[3] * CppAD::pow(x0, 3);
+      AD<double> psides0 = CppAD::atan(3 * coeffs[3] * x0 * x0 + 2 * coeffs[2] * x0 + coeffs[1]);
 
       // Here's `x` to get you started.
       // The idea here is to constraint this value to be 0.
@@ -127,7 +118,7 @@ class FG_eval {
       fg[1 + psi_start + t] = psi1 - (psi0 + v0 * delta0 / Lf * dt);
       fg[1 + v_start + t] = v1 - (v0 + a0 * dt);
       fg[1 + cte_start + t] = cte1 - ((f0 - y0) + (v0 * CppAD::sin(epsi0) * dt));
-      fg[1 + epsi_start + t] = epsi1 - ((psi0 - f0_prime) + v0 * delta0 / Lf * dt);
+      fg[1 + epsi_start + t] = epsi1 - (psi0 - psides0 + v0 * delta0 / Lf * dt);
     }
   }
 };
@@ -140,7 +131,6 @@ MPC::~MPC() {}
 
 vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   bool ok = true;
-  size_t i;
   typedef CPPAD_TESTVECTOR(double) Dvector;
 
   // TODO: Set the number of model variables (includes both states and inputs).
@@ -231,7 +221,7 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   // options for IPOPT solver
   std::string options;
   // Uncomment this if you'd like more print information
-  options += "Integer print_level  0\n";
+  //options += "Integer print_level  0\n";
   // NOTE: Setting sparse to true allows the solver to take advantage
   // of sparse routines, this makes the computation MUCH FASTER. If you
   // can uncomment 1 of these and see if it makes a difference or not but
@@ -264,13 +254,13 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   // {...} is shorthand for creating a vector, so auto x1 = {1.0,2.0}
   // creates a 2 element double vector.
   vector<double> ret;
-  ret.resize(2 + 2 * N);
+  ret.resize(N * 2);
   ret[0] = solution.x[delta_start];
   ret[1] = solution.x[a_start];
-  for (int i = 0; i < N - 1; i++)
+  for (size_t i = 0; i < N - 1; i++)
   {
-    ret[2 + 2 * i] = solution.x[x_start + i + 1];
-    ret[2 + 2 * i + 1] = solution.x[y_start + i + 1];
+    ret[2 + i * 2] = solution.x[x_start + i + 1];
+    ret[2 + i * 2 + 1] = solution.x[y_start + i + 1];
   }
   return ret;
 }

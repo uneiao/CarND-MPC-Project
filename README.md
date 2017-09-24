@@ -1,6 +1,35 @@
 # CarND-Controls-MPC
 Self-Driving Car Engineer Nanodegree Program
 
+[//]: # (Image References)
+[image1]: ./images/image1.png "Image1"
+
+---
+## Introduction
+Model Predictive Control(MPC) reframes the task of following a trajectory as an optimization problem, of which
+the solution is the optimal trajectory. MPC involves simulating different actuator inputs, predicting the resulting
+trajectory and selecting that trajectory with a minimum cost.
+
+### Model States
+The state vector contains 6 elements including: x for position of x coordinate, y for position of y coordinate,
+psi for orientation angle, v for velocity, cte for cross track error and epsi for psi error.
+
+Formula:
+![Formula][image1]
+
+### Length and Duration
+The chosen value for N is 10 while the chosen value for dt is 0.1.
+100ms is short enough to maintain update frequency for the model without getting too large error.
+10 steps is enough for well approximating the trajectory.
+
+### Latency State
+In order to simulate a delay as the command propagates through the system. The state vector is updated with 
+a latency of dt before passing to the solver of optimization problem.
+
+### Cost Function Tuning
+Some weights are applied on different proportions of the total cost. A higher weight of cte proportion minimizes the 
+cte better, keeping the car in the central position of lane. A higher weight of changing rate can smooth the turns.
+
 ---
 
 ## Dependencies
